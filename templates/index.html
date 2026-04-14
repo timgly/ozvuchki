@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Озвучки — Дашборд</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --border: #2a2d3a;
+    --text: #e4e6f0;
+    --text-dim: #8b8fa3;
+    --green: #2ecc71;
+    --green-bg: rgba(46,204,113,.15);
+    --yellow: #f1c40f;
+    --yellow-bg: rgba(241,196,15,.12);
+    --red: #e74c3c;
+    --red-bg: rgba(231,76,60,.12);
+    --accent: #6c5ce7;
+    --accent-light: #a29bfe;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+  }
+  .header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 24px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+  }
+  .header h1 {
+    font-size: 18px;
+    font-weight: 600;
+    letter-spacing: .3px;
+  }
+  .header .sync-info {
+    font-size: 12px;
+    color: var(--text-dim);
+  }
+  .tabs {
+    display: flex;
+    gap: 0;
+    padding: 0 24px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+  }
+  .tab {
+    padding: 10px 20px;
+    cursor: pointer;
+    font-size: 14px;
+    color: var(--text-dim);
+    border-bottom: 2px solid transparent;
+    transition: all .2s;
+    user-select: none;
+  }
+  .tab:hover { color: var(--text); }
+  .tab.active {
+    color: var(--accent-light);
+    border-bottom-color: var(--accent);
+    font-weight: 500;
+  }
+  .table-wrap {
+    padding: 16px 24px;
+    overflow-x: auto;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+    table-layout: fixed;
+  }
+  th {
+    position: sticky;
+    top: 0;
+    background: var(--surface);
+    color: var(--text-dim);
+    font-weight: 500;
+    text-transform: uppercase;
+    font-size: 11px;
+    letter-spacing: .5px;
+    padding: 10px 8px;
+    text-align: center;
+    border-bottom: 2px solid var(--border);
+  }
+  th:first-child {
+    text-align: left;
+    width: 180px;
+  }
+  td {
+    padding: 6px 8px;
+    text-align: center;
+    border-bottom: 1px solid var(--border);
+    vertical-align: middle;
+    height: 44px;
+    position: relative;
+  }
+  td:first-child {
+    text-align: left;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  tr:hover td { background: rgba(255,255,255,.02); }
+
+  .cell-done {
+    background: var(--green-bg) !important;
+    color: var(--green);
+    font-weight: 600;
+  }
+  .cell-partial {
+    background: var(--yellow-bg) !important;
+    color: var(--yellow);
+  }
+  .cell-deadline {
+    background: var(--yellow-bg) !important;
+    color: var(--yellow);
+    font-size: 11px;
+  }
+  .cell-overdue {
+    background: var(--red-bg) !important;
+    color: var(--red);
+    font-size: 11px;
+  }
+
+  .cell-inner {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    position: relative;
+  }
+  .status-label { font-size: 13px; }
+  .deadline-label { font-size: 10px; opacity: .8; }
+
+  .upload-btn {
+    position: absolute;
+    bottom: 2px;
+    right: 4px;
+    width: 20px;
+    height: 20px;
+    border: none;
+    background: transparent;
+    color: var(--text-dim);
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 20px;
+    border-radius: 4px;
+    opacity: 0;
+    transition: opacity .15s;
+  }
+  td:hover .upload-btn { opacity: 1; }
+  .upload-btn:hover {
+    background: var(--accent);
+    color: #fff;
+  }
+
+  .upload-input { display: none; }
+
+  .toast {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    padding: 12px 20px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 13px;
+    color: var(--green);
+    transform: translateY(80px);
+    opacity: 0;
+    transition: all .3s;
+    z-index: 100;
+  }
+  .toast.show {
+    transform: translateY(0);
+    opacity: 1;
+  }
+  .toast.error { color: var(--red); }
+
+  .progress-bar {
+    padding: 0 24px 8px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 12px;
+    color: var(--text-dim);
+  }
+  .progress-track {
+    flex: 1;
+    height: 4px;
+    background: var(--border);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  .progress-fill {
+    height: 100%;
+    background: var(--green);
+    border-radius: 2px;
+    transition: width .4s ease;
+  }
+
+  @media (max-width: 768px) {
+    .header { padding: 12px 16px; }
+    .tabs { padding: 0 16px; }
+    .table-wrap { padding: 12px 8px; }
+    th:first-child, td:first-child { width: 120px; }
+    table { font-size: 12px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>Озвучки</h1>
+  <div class="sync-info" id="syncInfo">Загрузка…</div>
+</div>
+
+<div class="tabs" id="tabBar"></div>
+
+<div class="progress-bar">
+  <span id="progressLabel">—</span>
+  <div class="progress-track"><div class="progress-fill" id="progressFill" style="width:0%"></div></div>
+</div>
+
+<div class="table-wrap">
+  <table>
+    <thead id="thead"></thead>
+    <tbody id="tbody"></tbody>
+  </table>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const TABS = {{ tabs | safe }};
+let currentSheet = 0;
+const REFRESH_MS = 300000;
+
+function buildTabs() {
+  const bar = document.getElementById('tabBar');
+  bar.innerHTML = '';
+  TABS.forEach((name, i) => {
+    const d = document.createElement('div');
+    d.className = 'tab' + (i === currentSheet ? ' active' : '');
+    d.textContent = name;
+    d.onclick = () => switchTab(i);
+    bar.appendChild(d);
+  });
+}
+
+function switchTab(i) {
+  currentSheet = i;
+  buildTabs();
+  fetchData();
+}
+
+function showToast(msg, error) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast show' + (error ? ' error' : '');
+  setTimeout(() => t.className = 'toast', 3000);
+}
+
+function triggerUpload(project, column) {
+  const inp = document.createElement('input');
+  inp.type = 'file';
+  inp.onchange = () => {
+    if (!inp.files.length) return;
+    const fd = new FormData();
+    fd.append('sheet', currentSheet);
+    fd.append('project', project);
+    fd.append('column', column);
+    fd.append('file', inp.files[0]);
+    fetch('/api/upload', { method: 'POST', body: fd })
+      .then(r => r.json())
+      .then(data => {
+        if (data.ok) {
+          showToast('Файл загружен: ' + data.saved);
+          fetchData();
+        } else {
+          showToast('Ошибка: ' + (data.error || '?'), true);
+        }
+      })
+      .catch(() => showToast('Ошибка сети', true));
+  };
+  inp.click();
+}
+
+function renderTable(data) {
+  const { columns, rows } = data;
+
+  const thead = document.getElementById('thead');
+  thead.innerHTML = '<tr>' + columns.map(c => '<th>' + c + '</th>').join('') + '</tr>';
+
+  let doneCount = 0;
+  let totalCount = 0;
+
+  const tbody = document.getElementById('tbody');
+  tbody.innerHTML = '';
+
+  rows.forEach(row => {
+    const tr = document.createElement('tr');
+
+    const tdName = document.createElement('td');
+    tdName.textContent = row.name;
+    tdName.title = row.name;
+    tr.appendChild(tdName);
+
+    columns.slice(1).forEach(col => {
+      const td = document.createElement('td');
+      const done = row.cells[col];
+      const parts = row.parts[col] || {};
+      const dl = row.deadlines[col];
+      const isGotovo = col === 'Готово';
+      totalCount++;
+
+      let cls = '';
+      let html = '';
+
+      if (done) {
+        cls = 'cell-done';
+        html = '<div class="cell-inner"><span class="status-label">✓</span></div>';
+        doneCount++;
+      } else if (parts.found > 0 && parts.total > 0) {
+        cls = 'cell-partial';
+        let label = parts.found + '/' + parts.total;
+        html = '<div class="cell-inner"><span class="status-label">' + label + '</span>';
+        if (dl && dl.date) html += '<span class="deadline-label">до ' + dl.date + '</span>';
+        html += '</div>';
+      } else if (dl && dl.date) {
+        cls = dl.overdue ? 'cell-overdue' : 'cell-deadline';
+        html = '<div class="cell-inner"><span class="status-label">до ' + dl.date + '</span>';
+        if (dl.overdue) html = '<div class="cell-inner"><span class="status-label">⚠ ' + dl.date + '</span>';
+        html += '</div>';
+      }
+
+      td.className = cls;
+      td.innerHTML = html;
+
+      if (!isGotovo && !done) {
+        const btn = document.createElement('button');
+        btn.className = 'upload-btn';
+        btn.textContent = '↑';
+        btn.title = 'Загрузить файл';
+        btn.onclick = (e) => { e.stopPropagation(); triggerUpload(row.name, col); };
+        td.appendChild(btn);
+      }
+
+      tr.appendChild(td);
+    });
+
+    tbody.appendChild(tr);
+  });
+
+  const pct = totalCount > 0 ? Math.round(doneCount / totalCount * 100) : 0;
+  document.getElementById('progressLabel').textContent = doneCount + '/' + totalCount + ' (' + pct + '%)';
+  document.getElementById('progressFill').style.width = pct + '%';
+  document.getElementById('syncInfo').textContent = 'Обновлено: ' + new Date().toLocaleTimeString('ru');
+}
+
+function fetchData() {
+  fetch('/api/status?sheet=' + currentSheet)
+    .then(r => r.json())
+    .then(renderTable)
+    .catch(() => document.getElementById('syncInfo').textContent = 'Ошибка загрузки');
+}
+
+buildTabs();
+fetchData();
+setInterval(fetchData, REFRESH_MS);
+</script>
+</body>
+</html>
