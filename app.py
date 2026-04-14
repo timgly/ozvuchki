@@ -20,6 +20,21 @@ from sync_sheet import (
 app = Flask(__name__)
 
 
+def ensure_dirs():
+    """Create folder structure on first run (important for server deploys)."""
+    for cfg in SHEETS:
+        folder = cfg["folder"]
+        names_dir = folder / "Название"
+        names_dir.mkdir(parents=True, exist_ok=True)
+        for col in COLUMNS[1:-1]:
+            (folder / col).mkdir(parents=True, exist_ok=True)
+        for project in cfg["order"]:
+            (names_dir / to_fs(project)).mkdir(exist_ok=True)
+
+
+ensure_dirs()
+
+
 def get_scan_data(sheet_idx: int) -> dict:
     cfg = SHEETS[sheet_idx]
     folder = cfg["folder"]

@@ -1,6 +1,15 @@
 credentials.json
 deadlines.json
+deploy.sh
 venv/
 __pycache__/
 *.pyc
 .DS_Store
+Название/
+Перевод/
+Озвучка/
+Аудио-монтаж/
+Визуализация/
+Видео-монтаж/
+Готово/
+Лист2/
