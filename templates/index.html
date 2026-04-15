@@ -281,7 +281,9 @@
 <script>
 const TABS = {{ tabs | safe }};
 let currentSheet = 0;
-const REFRESH_MS = 300000;
+/** Все листы в памяти браузера — переключение вкладок без запросов к серверу */
+let allSheets = [];
+const REFRESH_MS = 120000;
 
 function buildTabs() {
   const bar = document.getElementById('tabBar');
@@ -298,7 +300,11 @@ function buildTabs() {
 function switchTab(i) {
   currentSheet = i;
   buildTabs();
-  fetchData();
+  if (allSheets.length && allSheets[i]) {
+    renderTable(allSheets[i]);
+  } else {
+    loadAllSheets();
+  }
 }
 
 function showToast(msg, error) {
@@ -323,7 +329,7 @@ function triggerUpload(project, column) {
       .then(data => {
         if (data.ok) {
           showToast('Файл загружен: ' + data.saved);
-          fetchData();
+          loadAllSheets();
         } else {
           showToast('Ошибка: ' + (data.error || '?'), true);
         }
@@ -409,21 +415,28 @@ function forceRefresh() {
   const btn = document.getElementById('refreshBtn');
   btn.classList.add('loading');
   fetch('/api/refresh', { method: 'POST' })
-    .then(() => fetchData())
+    .then(() => loadAllSheets())
     .then(() => btn.classList.remove('loading'))
     .catch(() => btn.classList.remove('loading'));
 }
 
-function fetchData() {
-  fetch('/api/status?sheet=' + currentSheet)
+function loadAllSheets() {
+  return fetch('/api/status_all')
     .then(r => r.json())
-    .then(renderTable)
-    .catch(() => document.getElementById('syncInfo').textContent = 'Ошибка загрузки');
+    .then(data => {
+      allSheets = data.sheets || [];
+      if (allSheets[currentSheet]) {
+        renderTable(allSheets[currentSheet]);
+      }
+    })
+    .catch(() => {
+      document.getElementById('syncInfo').textContent = 'Ошибка загрузки';
+    });
 }
 
 buildTabs();
-fetchData();
-setInterval(fetchData, REFRESH_MS);
+loadAllSheets();
+setInterval(loadAllSheets, REFRESH_MS);
 </script>
 </body>
 </html>

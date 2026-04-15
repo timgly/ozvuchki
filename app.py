@@ -24,7 +24,7 @@ app = Flask(__name__)
 _sheet_cache: dict = {}
 _cache_lock = threading.Lock()
 _bootstrap_lock = threading.Lock()
-CACHE_TTL = 300
+CACHE_TTL = 120
 
 
 def _empty_sheet(tab: str) -> dict:
@@ -64,7 +64,7 @@ def _read_all_sheets() -> dict | None:
     result: dict = {}
     for i, cfg in enumerate(SHEETS):
         result[i] = _read_one_tab(spreadsheet, i, cfg)
-        time.sleep(0.35)
+        time.sleep(0.12)
     return result
 
 
@@ -169,6 +169,18 @@ def api_status():
     idx = request.args.get("sheet", 0, type=int)
     idx = max(0, min(idx, len(SHEETS) - 1))
     return jsonify(get_cached_data(idx))
+
+
+@app.route("/api/status_all")
+def api_status_all():
+    """All tabs in one JSON — from memory cache; no extra Google calls per tab."""
+    ensure_cache()
+    with _cache_lock:
+        sheets = [
+            _sheet_cache.get(i) or _empty_sheet(SHEETS[i]["tab"])
+            for i in range(len(SHEETS))
+        ]
+    return jsonify({"sheets": sheets})
 
 
 @app.route("/api/upload", methods=["POST"])
