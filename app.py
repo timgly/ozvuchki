@@ -31,6 +31,28 @@ def _empty_sheet(tab: str) -> dict:
     return {"columns": COLUMNS, "rows": [], "tab": tab}
 
 
+def _read_one_tab(spreadsheet, i: int, cfg: dict) -> dict:
+    """Read one worksheet; retry if sheet should have rows but API returned empty."""
+    tab = cfg["tab"]
+    expected = len(cfg.get("order") or [])
+    need_rows = expected > 15
+    last = _empty_sheet(tab)
+
+    for attempt in range(3):
+        try:
+            ws = spreadsheet.worksheet(tab)
+            last = _parse_sheet(ws.get_all_values(), tab)
+        except Exception as e:
+            print(f"Read error ({tab}) attempt {attempt + 1}: {e}")
+            last = _empty_sheet(tab)
+        nrows = len(last.get("rows") or [])
+        if not need_rows or nrows > 0 or attempt == 2:
+            return last
+        print(f"Retry read {tab}: 0 rows (expected ~{expected}), attempt {attempt + 1}")
+        time.sleep(2.0)
+    return last
+
+
 def _read_all_sheets() -> dict | None:
     """Read all tabs. Returns None if Google connection failed (keep old cache)."""
     try:
@@ -41,13 +63,8 @@ def _read_all_sheets() -> dict | None:
 
     result: dict = {}
     for i, cfg in enumerate(SHEETS):
-        tab = cfg["tab"]
-        try:
-            ws = spreadsheet.worksheet(tab)
-            result[i] = _parse_sheet(ws.get_all_values(), tab)
-        except Exception as e:
-            print(f"Read error ({tab}): {e}")
-            result[i] = _empty_sheet(tab)
+        result[i] = _read_one_tab(spreadsheet, i, cfg)
+        time.sleep(0.35)
     return result
 
 
