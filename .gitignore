@@ -1,6 +1,7 @@
 credentials.json
 deadlines.json
 deploy.sh
+sync.log
 venv/
 __pycache__/
 *.pyc

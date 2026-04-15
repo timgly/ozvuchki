@@ -34,7 +34,7 @@ COLUMNS = [
     "Готово",
 ]
 
-SYNC_INTERVAL = 900  # 15 минут
+SYNC_INTERVAL = 300  # 5 минут
 
 # --- Sheet configs ---
 # Each sheet: folder on disk, tab name in Google, ordered project list
