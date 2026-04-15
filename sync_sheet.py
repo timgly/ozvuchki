@@ -125,6 +125,20 @@ def norm(s: str) -> str:
     return unicodedata.normalize("NFC", s)
 
 
+def unify_slashes(s: str) -> str:
+    """⁄ ∕ ／ → / so Finder/Unicode filenames match project names."""
+    return (
+        s.replace("\u2044", "/")
+        .replace("\u2215", "/")
+        .replace("\uff0f", "/")
+    )
+
+
+def project_key(name: str) -> str:
+    """Stable key: display project name ↔ filesystem names."""
+    return norm(to_fs(unify_slashes(name)))
+
+
 def to_fs(name: str) -> str:
     """Display name → filesystem name (/ → : on macOS)."""
     return name.replace("/", ":")
@@ -201,14 +215,14 @@ def scan_projects(folder: Path, order: list[str]) -> list[str]:
     names_dir = folder / "Название"
     if not names_dir.is_dir():
         return []
-    existing_fs = {norm(d.name) for d in names_dir.iterdir() if d.is_dir()}
+    existing_fs = {project_key(to_display(d.name)) for d in names_dir.iterdir() if d.is_dir()}
     ordered = []
     for p in order:
-        if norm(to_fs(p)) in existing_fs:
+        if project_key(p) in existing_fs:
             ordered.append(p)
     for d in names_dir.iterdir():
         display = to_display(d.name)
-        if d.is_dir() and norm(to_fs(display)) not in {norm(to_fs(p)) for p in ordered}:
+        if d.is_dir() and project_key(display) not in {project_key(x) for x in ordered}:
             ordered.append(display)
     return ordered
 
@@ -218,7 +232,7 @@ def check_parts(project: str, column: str, folder: Path) -> tuple[bool, int, int
     if not col_dir.is_dir():
         return False, 0, 0
 
-    p = norm(to_fs(project))
+    p = project_key(project)
     found_parts = set()
     total = 0
     has_simple_match = False
@@ -229,13 +243,13 @@ def check_parts(project: str, column: str, folder: Path) -> tuple[bool, int, int
             continue
 
         bare = SIMPLE_RE.match(name)
-        if bare and norm(bare.group(1).strip()) == p:
+        if bare and project_key(bare.group(1).strip()) == p:
             has_simple_match = True
             continue
 
         for pattern in PARTS_PATTERNS:
             m = pattern.match(name)
-            if m and norm(m.group(1).strip()) == p:
+            if m and project_key(m.group(1).strip()) == p:
                 found_parts.add(int(m.group(2)))
                 total = max(total, int(m.group(3)))
                 break
