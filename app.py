@@ -162,6 +162,14 @@ def api_upload():
     return jsonify({"ok": True, "saved": str(dest.name)})
 
 
+@app.route("/api/refresh", methods=["POST"])
+def api_refresh():
+    """Force refresh: clear cache so next request reads fresh data from Google Sheets."""
+    with _cache_lock:
+        _sheet_cache.clear()
+    return jsonify({"ok": True})
+
+
 @app.route("/api/sheets")
 def api_sheets():
     return jsonify([s["tab"] for s in SHEETS])

@@ -40,10 +40,44 @@
     font-weight: 600;
     letter-spacing: .3px;
   }
+  .header-right {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
   .header .sync-info {
     font-size: 12px;
     color: var(--text-dim);
   }
+  .refresh-btn {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    padding: 5px 12px;
+    border-radius: 6px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all .2s;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+  }
+  .refresh-btn:hover {
+    border-color: var(--accent);
+    color: var(--accent-light);
+  }
+  .refresh-btn.loading {
+    opacity: .5;
+    pointer-events: none;
+  }
+  .refresh-btn .icon {
+    display: inline-block;
+    transition: transform .4s;
+  }
+  .refresh-btn.loading .icon {
+    animation: spin .8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
   .tabs {
     display: flex;
     gap: 0;
@@ -220,7 +254,12 @@
 
 <div class="header">
   <h1>Озвучки</h1>
-  <div class="sync-info" id="syncInfo">Загрузка…</div>
+  <div class="header-right">
+    <button class="refresh-btn" id="refreshBtn" onclick="forceRefresh()">
+      <span class="icon">↻</span> Обновить
+    </button>
+    <div class="sync-info" id="syncInfo">Загрузка…</div>
+  </div>
 </div>
 
 <div class="tabs" id="tabBar"></div>
@@ -364,6 +403,15 @@ function renderTable(data) {
   document.getElementById('progressLabel').textContent = doneCount + '/' + totalCount + ' (' + pct + '%)';
   document.getElementById('progressFill').style.width = pct + '%';
   document.getElementById('syncInfo').textContent = 'Обновлено: ' + new Date().toLocaleTimeString('ru');
+}
+
+function forceRefresh() {
+  const btn = document.getElementById('refreshBtn');
+  btn.classList.add('loading');
+  fetch('/api/refresh', { method: 'POST' })
+    .then(() => fetchData())
+    .then(() => btn.classList.remove('loading'))
+    .catch(() => btn.classList.remove('loading'));
 }
 
 function fetchData() {
