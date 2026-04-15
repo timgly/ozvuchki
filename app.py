@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Озвучки — онлайн Flask-дашборд.
-Читает статусы из Google Sheets (куда их пишет локальный sync_sheet.py).
+Читает статусы из Google Sheets. Устойчив к холодному старту и сбоям API.
 """
 
 import json
@@ -14,43 +14,49 @@ from pathlib import Path
 from flask import Flask, jsonify, render_template, request
 
 from sync_sheet import (
-    COLUMNS, SHEETS, SYNC_INTERVAL,
+    COLUMNS, SHEETS,
     connect, format_date, is_overdue, parse_date_from_cell,
     to_fs,
 )
 
 app = Flask(__name__)
 
-_sheet_cache = {}
+_sheet_cache: dict = {}
 _cache_lock = threading.Lock()
+_bootstrap_lock = threading.Lock()
 CACHE_TTL = 300
 
 
-def _read_all_sheets() -> dict:
-    """Read ALL tabs in one connection (1 connect instead of 3)."""
-    result = {}
+def _empty_sheet(tab: str) -> dict:
+    return {"columns": COLUMNS, "rows": [], "tab": tab}
+
+
+def _read_all_sheets() -> dict | None:
+    """Read all tabs. Returns None if Google connection failed (keep old cache)."""
     try:
         spreadsheet = connect()
-        for i, cfg in enumerate(SHEETS):
-            tab = cfg["tab"]
-            try:
-                ws = spreadsheet.worksheet(tab)
-                all_values = ws.get_all_values()
-                result[i] = _parse_sheet(all_values, tab)
-            except Exception as e:
-                print(f"Read error ({tab}): {e}")
-                result[i] = {"columns": COLUMNS, "rows": [], "tab": tab}
     except Exception as e:
         print(f"Connect error: {e}")
+        return None
+
+    result: dict = {}
+    for i, cfg in enumerate(SHEETS):
+        tab = cfg["tab"]
+        try:
+            ws = spreadsheet.worksheet(tab)
+            result[i] = _parse_sheet(ws.get_all_values(), tab)
+        except Exception as e:
+            print(f"Read error ({tab}): {e}")
+            result[i] = _empty_sheet(tab)
     return result
 
 
 def _parse_sheet(all_values: list, tab: str) -> dict:
     if len(all_values) < 2:
-        return {"columns": COLUMNS, "rows": [], "tab": tab}
+        return _empty_sheet(tab)
 
     header = all_values[0]
-    col_map = {h: i for i, h in enumerate(header) if h in COLUMNS}
+    col_map = {h: idx for idx, h in enumerate(header) if h in COLUMNS}
 
     rows = []
     for row_data in all_values[1:]:
@@ -78,10 +84,11 @@ def _parse_sheet(all_values: list, tab: str) -> dict:
 
             cells[col] = done
             parts_info[col] = {"found": found, "total": total}
-            deadlines_info[col] = {
-                "date": format_date(dl_iso),
-                "overdue": is_overdue(dl_iso),
-            } if dl_iso else None
+            deadlines_info[col] = (
+                {"date": format_date(dl_iso), "overdue": is_overdue(dl_iso)}
+                if dl_iso
+                else None
+            )
 
         rows.append({
             "name": project,
@@ -93,18 +100,45 @@ def _parse_sheet(all_values: list, tab: str) -> dict:
     return {"columns": COLUMNS, "rows": rows, "tab": tab}
 
 
+def _cache_fully_populated() -> bool:
+    return len(_sheet_cache) >= len(SHEETS) and all(
+        i in _sheet_cache for i in range(len(SHEETS))
+    )
+
+
+def refresh_cache() -> None:
+    """Fetch from Google Sheets. On failure, keep previous cache if any."""
+    global _sheet_cache
+    new_data = _read_all_sheets()
+    if new_data is None:
+        with _cache_lock:
+            if not _sheet_cache:
+                for i in range(len(SHEETS)):
+                    _sheet_cache[i] = _empty_sheet(SHEETS[i]["tab"])
+        return
+    all_empty = all(not v.get("rows") for v in new_data.values())
+    with _cache_lock:
+        had_rows = any(len(v.get("rows") or []) > 0 for v in _sheet_cache.values())
+        if all_empty and had_rows:
+            print("refresh_cache: skip replacing good cache with all-empty read")
+            return
+        _sheet_cache.update(new_data)
+
+
+def ensure_cache() -> None:
+    """First request / cold worker: load synchronously (no empty flash)."""
+    if _cache_fully_populated():
+        return
+    with _bootstrap_lock:
+        if _cache_fully_populated():
+            return
+        refresh_cache()
+
+
 def get_cached_data(sheet_idx: int) -> dict:
+    ensure_cache()
     with _cache_lock:
-        entry = _sheet_cache.get(sheet_idx)
-        if entry:
-            return entry
-    return {"columns": COLUMNS, "rows": [], "tab": SHEETS[sheet_idx]["tab"]}
-
-
-def refresh_cache():
-    data = _read_all_sheets()
-    with _cache_lock:
-        _sheet_cache.update(data)
+        return _sheet_cache.get(sheet_idx) or _empty_sheet(SHEETS[sheet_idx]["tab"])
 
 
 @app.route("/")
@@ -153,7 +187,8 @@ def api_upload():
 
 @app.route("/api/refresh", methods=["POST"])
 def api_refresh():
-    threading.Thread(target=refresh_cache, daemon=True).start()
+    """Synchronous refresh so UI never reads stale empty during reload."""
+    refresh_cache()
     return jsonify({"ok": True})
 
 
@@ -163,14 +198,14 @@ def api_sheets():
 
 
 def background_refresh():
-    refresh_cache()
+    time.sleep(15)
     while True:
-        time.sleep(CACHE_TTL)
         try:
             refresh_cache()
             print(f"[{time.strftime('%H:%M:%S')}] Cache refreshed")
         except Exception as e:
             print(f"Cache refresh error: {e}")
+        time.sleep(CACHE_TTL)
 
 
 threading.Thread(target=background_refresh, daemon=True).start()
