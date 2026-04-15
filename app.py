@@ -2,7 +2,6 @@
 """
 Озвучки — онлайн Flask-дашборд.
 Читает статусы из Google Sheets (куда их пишет локальный sync_sheet.py).
-Поддерживает загрузку файлов через веб → сразу отмечает в Google Sheets.
 """
 
 import json
@@ -10,42 +9,48 @@ import os
 import re
 import threading
 import time
-from datetime import date
 from pathlib import Path
 
 from flask import Flask, jsonify, render_template, request
 
 from sync_sheet import (
-    COLUMNS, SHEETS, SPREADSHEET_ID, SYNC_INTERVAL,
+    COLUMNS, SHEETS, SYNC_INTERVAL,
     connect, format_date, is_overdue, parse_date_from_cell,
-    to_fs, check_parts, scan_projects,
+    to_fs,
 )
 
 app = Flask(__name__)
 
 _sheet_cache = {}
 _cache_lock = threading.Lock()
-CACHE_TTL = 60
+CACHE_TTL = 300
 
 
-def _read_sheet_data(sheet_idx: int) -> dict:
-    """Read one tab from Google Sheets and parse into dashboard format."""
-    cfg = SHEETS[sheet_idx]
-    tab = cfg["tab"]
-    order = cfg["order"]
+def _read_all_sheets() -> dict:
+    """Read ALL tabs in one connection (1 connect instead of 3)."""
+    result = {}
+    try:
+        spreadsheet = connect()
+        for i, cfg in enumerate(SHEETS):
+            tab = cfg["tab"]
+            try:
+                ws = spreadsheet.worksheet(tab)
+                all_values = ws.get_all_values()
+                result[i] = _parse_sheet(all_values, tab)
+            except Exception as e:
+                print(f"Read error ({tab}): {e}")
+                result[i] = {"columns": COLUMNS, "rows": [], "tab": tab}
+    except Exception as e:
+        print(f"Connect error: {e}")
+    return result
 
-    spreadsheet = connect()
-    ws = spreadsheet.worksheet(tab)
-    all_values = ws.get_all_values()
 
+def _parse_sheet(all_values: list, tab: str) -> dict:
     if len(all_values) < 2:
         return {"columns": COLUMNS, "rows": [], "tab": tab}
 
     header = all_values[0]
-    col_map = {}
-    for i, h in enumerate(header):
-        if h in COLUMNS:
-            col_map[h] = i
+    col_map = {h: i for i, h in enumerate(header) if h in COLUMNS}
 
     rows = []
     for row_data in all_values[1:]:
@@ -69,18 +74,14 @@ def _read_sheet_data(sheet_idx: int) -> dict:
                 parts_m = re.match(r"(\d+)/(\d+)", cell_val)
                 if parts_m:
                     found, total = int(parts_m.group(1)), int(parts_m.group(2))
-
                 dl_iso = parse_date_from_cell(cell_val)
 
             cells[col] = done
             parts_info[col] = {"found": found, "total": total}
-            if dl_iso:
-                deadlines_info[col] = {
-                    "date": format_date(dl_iso),
-                    "overdue": is_overdue(dl_iso),
-                }
-            else:
-                deadlines_info[col] = None
+            deadlines_info[col] = {
+                "date": format_date(dl_iso),
+                "overdue": is_overdue(dl_iso),
+            } if dl_iso else None
 
         rows.append({
             "name": project,
@@ -93,22 +94,17 @@ def _read_sheet_data(sheet_idx: int) -> dict:
 
 
 def get_cached_data(sheet_idx: int) -> dict:
-    """Return cached sheet data, refresh if older than CACHE_TTL seconds."""
-    now = time.time()
     with _cache_lock:
         entry = _sheet_cache.get(sheet_idx)
-        if entry and now - entry["ts"] < CACHE_TTL:
-            return entry["data"]
+        if entry:
+            return entry
+    return {"columns": COLUMNS, "rows": [], "tab": SHEETS[sheet_idx]["tab"]}
 
-    data = _read_sheet_data(sheet_idx)
+
+def refresh_cache():
+    data = _read_all_sheets()
     with _cache_lock:
-        _sheet_cache[sheet_idx] = {"data": data, "ts": time.time()}
-    return data
-
-
-def invalidate_cache(sheet_idx: int):
-    with _cache_lock:
-        _sheet_cache.pop(sheet_idx, None)
+        _sheet_cache.update(data)
 
 
 @app.route("/")
@@ -121,15 +117,11 @@ def index():
 def api_status():
     idx = request.args.get("sheet", 0, type=int)
     idx = max(0, min(idx, len(SHEETS) - 1))
-    try:
-        return jsonify(get_cached_data(idx))
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    return jsonify(get_cached_data(idx))
 
 
 @app.route("/api/upload", methods=["POST"])
 def api_upload():
-    """Upload a file → save to server folder → trigger local sync → update sheet."""
     sheet_idx = request.form.get("sheet", 0, type=int)
     project = request.form.get("project", "").strip()
     column = request.form.get("column", "").strip()
@@ -139,23 +131,20 @@ def api_upload():
         return jsonify({"error": "Missing project, column, or file"}), 400
 
     sheet_idx = max(0, min(sheet_idx, len(SHEETS) - 1))
-    cfg = SHEETS[sheet_idx]
-    folder = cfg["folder"]
+    folder = SHEETS[sheet_idx]["folder"]
 
     col_dir = folder / column
     col_dir.mkdir(parents=True, exist_ok=True)
-    names_dir = folder / "Название" / to_fs(project)
-    names_dir.mkdir(parents=True, exist_ok=True)
+    (folder / "Название" / to_fs(project)).mkdir(parents=True, exist_ok=True)
 
-    safe_project = to_fs(project)
     ext = Path(file.filename).suffix if file.filename else ""
-    dest = col_dir / f"{safe_project}{ext}"
+    dest = col_dir / f"{to_fs(project)}{ext}"
     file.save(str(dest))
 
     try:
         from sync_sheet import sync_all
         sync_all()
-        invalidate_cache(sheet_idx)
+        refresh_cache()
     except Exception as e:
         print(f"Post-upload sync error: {e}")
 
@@ -164,9 +153,7 @@ def api_upload():
 
 @app.route("/api/refresh", methods=["POST"])
 def api_refresh():
-    """Force refresh: clear cache so next request reads fresh data from Google Sheets."""
-    with _cache_lock:
-        _sheet_cache.clear()
+    threading.Thread(target=refresh_cache, daemon=True).start()
     return jsonify({"ok": True})
 
 
@@ -176,17 +163,14 @@ def api_sheets():
 
 
 def background_refresh():
-    """Periodically refresh the cache so dashboard always has fresh data."""
-    time.sleep(10)
+    refresh_cache()
     while True:
-        for i in range(len(SHEETS)):
-            try:
-                data = _read_sheet_data(i)
-                with _cache_lock:
-                    _sheet_cache[i] = {"data": data, "ts": time.time()}
-            except Exception as e:
-                print(f"Cache refresh error (sheet {i}): {e}")
         time.sleep(CACHE_TTL)
+        try:
+            refresh_cache()
+            print(f"[{time.strftime('%H:%M:%S')}] Cache refreshed")
+        except Exception as e:
+            print(f"Cache refresh error: {e}")
 
 
 threading.Thread(target=background_refresh, daemon=True).start()
