@@ -421,10 +421,16 @@ function forceRefresh() {
 }
 
 function loadAllSheets() {
-  return fetch('/api/status_all')
-    .then(r => r.json())
-    .then(data => {
-      allSheets = data.sheets || [];
+  return Promise.all(
+    TABS.map((_, i) =>
+      fetch('/api/status?sheet=' + i).then(r => {
+        if (!r.ok) throw new Error('sheet ' + i);
+        return r.json();
+      })
+    )
+  )
+    .then(sheets => {
+      allSheets = sheets;
       if (allSheets[currentSheet]) {
         renderTable(allSheets[currentSheet]);
       }
