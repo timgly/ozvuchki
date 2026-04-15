@@ -420,24 +420,32 @@ function forceRefresh() {
     .catch(() => btn.classList.remove('loading'));
 }
 
+async function loadAllSheetsSequential() {
+  const sheets = [];
+  for (let i = 0; i < TABS.length; i++) {
+    const r = await fetch('/api/status?sheet=' + i);
+    if (!r.ok) throw new Error('sheet ' + i);
+    sheets.push(await r.json());
+  }
+  allSheets = sheets;
+  if (allSheets[currentSheet]) renderTable(allSheets[currentSheet]);
+}
+
 function loadAllSheets() {
-  return Promise.all(
-    TABS.map((_, i) =>
-      fetch('/api/status?sheet=' + i).then(r => {
-        if (!r.ok) throw new Error('sheet ' + i);
-        return r.json();
-      })
-    )
-  )
-    .then(sheets => {
-      allSheets = sheets;
-      if (allSheets[currentSheet]) {
-        renderTable(allSheets[currentSheet]);
-      }
+  return fetch('/api/status_all')
+    .then(r => {
+      if (!r.ok) throw new Error('status_all');
+      return r.json();
     })
-    .catch(() => {
-      document.getElementById('syncInfo').textContent = 'Ошибка загрузки';
-    });
+    .then(data => {
+      allSheets = data.sheets || [];
+      if (allSheets[currentSheet]) renderTable(allSheets[currentSheet]);
+    })
+    .catch(() =>
+      loadAllSheetsSequential().catch(() => {
+        document.getElementById('syncInfo').textContent = 'Ошибка загрузки';
+      })
+    );
 }
 
 buildTabs();

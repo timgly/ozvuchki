@@ -4,6 +4,7 @@
 Читает статусы из Google Sheets. Устойчив к холодному старту и сбоям API.
 """
 
+import gzip
 import json
 import os
 import re
@@ -11,7 +12,7 @@ import threading
 import time
 from pathlib import Path
 
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, Response, jsonify, render_template, request
 
 from sync_sheet import (
     COLUMNS, SHEETS,
@@ -173,14 +174,19 @@ def api_status():
 
 @app.route("/api/status_all")
 def api_status_all():
-    """All tabs in one JSON — from memory cache; no extra Google calls per tab."""
+    """All tabs in one JSON from cache. gzip — меньше тело, реже 502 на прокси."""
     ensure_cache()
     with _cache_lock:
         sheets = [
             _sheet_cache.get(i) or _empty_sheet(SHEETS[i]["tab"])
             for i in range(len(SHEETS))
         ]
-    return jsonify({"sheets": sheets})
+    raw = json.dumps({"sheets": sheets}, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    enc = request.headers.get("Accept-Encoding", "")
+    if "gzip" in enc and len(raw) > 2048:
+        z = gzip.compress(raw, compresslevel=6)
+        return Response(z, mimetype="application/json", headers={"Content-Encoding": "gzip"})
+    return Response(raw, mimetype="application/json")
 
 
 @app.route("/api/upload", methods=["POST"])
