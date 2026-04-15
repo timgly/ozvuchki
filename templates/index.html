@@ -270,9 +270,8 @@
 </div>
 
 <div class="table-wrap">
-  <table>
+  <table id="mainTable">
     <thead id="thead"></thead>
-    <tbody id="tbody"></tbody>
   </table>
 </div>
 
@@ -285,26 +284,50 @@ let currentSheet = 0;
 let allSheets = [];
 const REFRESH_MS = 120000;
 
-function buildTabs() {
+function initTabs() {
   const bar = document.getElementById('tabBar');
   bar.innerHTML = '';
   TABS.forEach((name, i) => {
     const d = document.createElement('div');
-    d.className = 'tab' + (i === currentSheet ? ' active' : '');
+    d.className = 'tab' + (i === 0 ? ' active' : '');
     d.textContent = name;
     d.onclick = () => switchTab(i);
     bar.appendChild(d);
   });
 }
 
-function switchTab(i) {
-  currentSheet = i;
-  buildTabs();
-  if (allSheets.length && allSheets[i]) {
-    renderTable(allSheets[i]);
-  } else {
-    loadAllSheets();
+function updateTabActive(i) {
+  document.querySelectorAll('#tabBar .tab').forEach((el, idx) => {
+    el.classList.toggle('active', idx === i);
+  });
+}
+
+function ensureTbodies() {
+  const table = document.getElementById('mainTable');
+  for (let i = 0; i < TABS.length; i++) {
+    if (document.getElementById('tbody-' + i)) continue;
+    const tb = document.createElement('tbody');
+    tb.id = 'tbody-' + i;
+    tb.className = 'sheet-body';
+    tb.hidden = i !== 0;
+    table.appendChild(tb);
   }
+}
+
+function switchTab(i) {
+  if (!allSheets[i]) {
+    currentSheet = i;
+    updateTabActive(i);
+    loadAllSheets();
+    return;
+  }
+  currentSheet = i;
+  updateTabActive(i);
+  TABS.forEach((_, idx) => {
+    const tb = document.getElementById('tbody-' + idx);
+    if (tb) tb.hidden = idx !== i;
+  });
+  updateProgress(allSheets[i]);
 }
 
 function showToast(msg, error) {
@@ -314,13 +337,14 @@ function showToast(msg, error) {
   setTimeout(() => t.className = 'toast', 3000);
 }
 
-function triggerUpload(project, column) {
+function triggerUpload(project, column, sheetIdx) {
+  const si = sheetIdx !== undefined ? sheetIdx : currentSheet;
   const inp = document.createElement('input');
   inp.type = 'file';
   inp.onchange = () => {
     if (!inp.files.length) return;
     const fd = new FormData();
-    fd.append('sheet', currentSheet);
+    fd.append('sheet', si);
     fd.append('project', project);
     fd.append('column', column);
     fd.append('file', inp.files[0]);
@@ -339,17 +363,26 @@ function triggerUpload(project, column) {
   inp.click();
 }
 
-function renderTable(data) {
-  const { columns, rows } = data;
-
-  const thead = document.getElementById('thead');
-  thead.innerHTML = '<tr>' + columns.map(c => '<th>' + c + '</th>').join('') + '</tr>';
-
+function updateProgress(data) {
+  const columns = data.columns;
+  const rows = data.rows;
   let doneCount = 0;
   let totalCount = 0;
+  rows.forEach(row => {
+    columns.slice(1).forEach(col => {
+      totalCount++;
+      if (row.cells[col]) doneCount++;
+    });
+  });
+  const pct = totalCount > 0 ? Math.round(doneCount / totalCount * 100) : 0;
+  document.getElementById('progressLabel').textContent = doneCount + '/' + totalCount + ' (' + pct + '%)';
+  document.getElementById('progressFill').style.width = pct + '%';
+  document.getElementById('syncInfo').textContent = 'Обновлено: ' + new Date().toLocaleTimeString('ru');
+}
 
-  const tbody = document.getElementById('tbody');
-  tbody.innerHTML = '';
+function fillTbody(tbody, data, sheetIdx) {
+  const { columns, rows } = data;
+  tbody.textContent = '';
 
   rows.forEach(row => {
     const tr = document.createElement('tr');
@@ -365,7 +398,6 @@ function renderTable(data) {
       const parts = row.parts[col] || {};
       const dl = row.deadlines[col];
       const isGotovo = col === 'Готово';
-      totalCount++;
 
       let cls = '';
       let html = '';
@@ -373,7 +405,6 @@ function renderTable(data) {
       if (done) {
         cls = 'cell-done';
         html = '<div class="cell-inner"><span class="status-label">✓</span></div>';
-        doneCount++;
       } else if (parts.found > 0 && parts.total > 0) {
         cls = 'cell-partial';
         let label = parts.found + '/' + parts.total;
@@ -395,7 +426,7 @@ function renderTable(data) {
         btn.className = 'upload-btn';
         btn.textContent = '↑';
         btn.title = 'Загрузить файл';
-        btn.onclick = (e) => { e.stopPropagation(); triggerUpload(row.name, col); };
+        btn.onclick = (e) => { e.stopPropagation(); triggerUpload(row.name, col, sheetIdx); };
         td.appendChild(btn);
       }
 
@@ -404,11 +435,25 @@ function renderTable(data) {
 
     tbody.appendChild(tr);
   });
+}
 
-  const pct = totalCount > 0 ? Math.round(doneCount / totalCount * 100) : 0;
-  document.getElementById('progressLabel').textContent = doneCount + '/' + totalCount + ' (' + pct + '%)';
-  document.getElementById('progressFill').style.width = pct + '%';
-  document.getElementById('syncInfo').textContent = 'Обновлено: ' + new Date().toLocaleTimeString('ru');
+function renderAllSheets() {
+  if (!allSheets.length || !allSheets[0]) return;
+  const thead = document.getElementById('thead');
+  const cols = allSheets[0].columns;
+  thead.innerHTML = '<tr>' + cols.map(c => '<th>' + c + '</th>').join('') + '</tr>';
+
+  allSheets.forEach((data, i) => {
+    const tb = document.getElementById('tbody-' + i);
+    if (tb && data) fillTbody(tb, data, i);
+  });
+
+  TABS.forEach((_, idx) => {
+    const tb = document.getElementById('tbody-' + idx);
+    if (tb) tb.hidden = idx !== currentSheet;
+  });
+  updateTabActive(currentSheet);
+  updateProgress(allSheets[currentSheet]);
 }
 
 function forceRefresh() {
@@ -428,7 +473,7 @@ async function loadAllSheetsSequential() {
     sheets.push(await r.json());
   }
   allSheets = sheets;
-  if (allSheets[currentSheet]) renderTable(allSheets[currentSheet]);
+  renderAllSheets();
 }
 
 function loadAllSheets() {
@@ -439,7 +484,7 @@ function loadAllSheets() {
     })
     .then(data => {
       allSheets = data.sheets || [];
-      if (allSheets[currentSheet]) renderTable(allSheets[currentSheet]);
+      renderAllSheets();
     })
     .catch(() =>
       loadAllSheetsSequential().catch(() => {
@@ -448,7 +493,8 @@ function loadAllSheets() {
     );
 }
 
-buildTabs();
+initTabs();
+ensureTbodies();
 loadAllSheets();
 setInterval(loadAllSheets, REFRESH_MS);
 </script>
