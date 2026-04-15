@@ -228,20 +228,17 @@ def check_parts(project: str, column: str, folder: Path) -> tuple[bool, int, int
         if name.startswith("."):
             continue
 
-        matched = False
+        bare = SIMPLE_RE.match(name)
+        if bare and norm(bare.group(1).strip()) == p:
+            has_simple_match = True
+            continue
+
         for pattern in PARTS_PATTERNS:
             m = pattern.match(name)
-            if m:
-                if norm(m.group(1).strip()) == p:
-                    found_parts.add(int(m.group(2)))
-                    total = max(total, int(m.group(3)))
-                matched = True
+            if m and norm(m.group(1).strip()) == p:
+                found_parts.add(int(m.group(2)))
+                total = max(total, int(m.group(3)))
                 break
-
-        if not matched:
-            bare = SIMPLE_RE.match(name)
-            if bare and norm(bare.group(1).strip()) == p:
-                has_simple_match = True
 
     if total > 0:
         return len(found_parts) >= total, len(found_parts), total
